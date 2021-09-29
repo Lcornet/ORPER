@@ -53,7 +53,7 @@ This command should give a nextflow report like this:
     Completed at: 07-Sep-2021 09:22:27
     Duration    : 20h 47m 27s
     CPU hours   : 25.6
-    Succeeded   : 23
+    Succeeded   : 24
 
 ### Advance usage
 
