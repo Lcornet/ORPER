@@ -10,7 +10,7 @@ https://stackoverflow.com/questions/63865962/singularity-3-6-2-installation
 
 ### ORPER
 
-Please build the singularity container using ORPER.def and make sure to place RNAmmer in the ORPER directory. Please visit https://services.healthtech.dtu.dk/software.php to download RNAmmer v1.2.
+Please build the singularity container using ORPER.def.
 
     git clone https://github.com/Lcornet/ORPER
     sudo singularity build ORPER.sif ORPER.def
