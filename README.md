@@ -91,3 +91,7 @@ This file, which as to be in the folder where you ORPER should look like this:
 
 Please note that if your HPC system use symbolic link to mount partition, both links (hard link and symlink) has to be added
 in the bind (-B) linl of the config file.  
+
+### Copyright and License
+This software is copyright (c) 2017 by University of Liege / Unit of Eukaryotic Phylogenomics / Luc CORNET and Denis BAURAIN.  
+This is free software; you can redistribute it and/or modify.  
