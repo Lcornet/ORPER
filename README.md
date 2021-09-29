@@ -78,7 +78,7 @@ Please follow the help of ORPER:
     --cdhit             cdhit dereplication of provided SSU sequences, activated by default - yes or no
     --shrink            TreeShrink cutoff value, 0.1 by default
 
-### Advance usage
+### HPC usage
 
 For HPC usage, we recommend to use Nextflow configuration file: nextflow.config.  
 This file, which as to be in the folder where you ORPER should look like this:
