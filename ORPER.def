@@ -1,12 +1,12 @@
-Bootstrap: yum
-OSVersion: 8
-MirrorURL: http://mirror.centos.org/centos-8/8/BaseOS/x86_64/os/
-Include: yum
+BootStrap: debootstrap
+OSVersion: focal
+MirrorURL: http://us.archive.ubuntu.com/ubuntu/
 
 %files
     ORPER-companion.py /opt/ 
 
 %environment
+    export PATH=/usr/local/bin:$PATH
     export PATH=/opt/usr/local/bin:$PATH
     export PATH=/opt/BMGE-1.12:$PATH
     export PATH=/opt/hmmer/bin:$PATH
@@ -17,7 +17,6 @@ Include: yum
     export PATH=/opt/scafos:$PATH 
     export SCAFOS=/opt/scafos
     export PATH=/opt/ncbi-blast-2.10.0+/bin:$PATH
-    #export PATH=/opt/rnammer:$PATH
     export PATH=/opt/bedtools2/bin:$PATH
     export PATH=/opt/barrnap/bin:$PATH
     export PATH=/opt/cdhit:$PATH
@@ -31,51 +30,64 @@ Include: yum
     export PATH=/opt/ANIcalculator_v1:$PATH
     export PATH=/opt/ORPER:$PATH 
     export PATH=/opt/R/4.0.5/bin:$PATH
+    export PATH=/opt/FastANI:$PATH
 
 %post
-    #Update part
-    #permission part
-    chmod -R 777 /opt #chmod775 can be enough
-    chmod -R 777 /root #chmod775 can be enough
-    #modules
-    yum install -y git
-    yum install -y automake autoconf
-    yum install -y make
-    yum install -y zlib-devel    
-    #yum install -y bzip2-devel
-    yum install -y glibc-devel
-    yum install -y xz-devel
-    yum install -y zip unzip
-    yum install -y gcc gcc-c++ make 
-    yum install -y epel-release
-    yum install -y cmake3
-    #ln -s /usr/bin/cmake3 /usr/bin/cmake
-    yum install -y rsync
-    #yum install -y https://repo.ius.io/ius-release-el7.rpm
-    yum install -y python3
-    yum install -y wget
-    yum install -y epel-release
-    yum install -y boost boost-thread boost-devel
-    yum install -y perl-CPAN
-    yum install -y cpanminus
-    yum install -y patch
-    yum install -y java-11-openjdk-devel
-    yum install -y capnproto
-    yum install -y perl-LWP-Protocol-https    
-    yum install -y tar
-    yum -y install glibc-locale-source
-    localedef -i en_US -f UTF-8 en_US.UTF-8
-    pip3 install click
-    ln -s /usr/bin/python3 /usr/bin/python    
+    # Ubuntu
+    ## permission
+    chmod -R 777 /opt         # chmod775 can be enough
+    chmod -R 777 /root        # chmod775 can be enough
+    ## update repository for apt
+    apt update -y
+    apt install -y software-properties-common
+    apt-add-repository universe -y
 
-    #capnm module + BMC
-    cpanm LWP::Simple --force
-    cpanm aliased --force
-    cpanm Bio::MUST::Core
+    # Basic
+    apt-get install -y wget
+    apt-get install -y perl
+    apt-get install -y build-essential
+    apt-get install -y locales
+    localedef -i en_US -f UTF-8 en_US.UTF-8
+    apt-get install -y git
+    apt-get install -y python3
+    apt-get install -y wget
+    apt-get install -y zip unzip
+    apt-get install -y openjdk-11-jdk
+    apt-get install -y capnproto
+    apt-get install -y python3-pip
+    pip3 install click
+    ln -s /usr/bin/python3 /usr/bin/python
+    ## Dependencies for pysam
+    apt-get install -y libcurl4-openssl-dev
+    apt-get install -y gcc
+    apt-get install -y make
+    apt-get install -y libbz2-dev
+    apt-get install -y zlib1g-dev
+    apt-get install -y libncurses5-dev 
+    apt-get install -y libncursesw5-dev
+    apt-get install -y liblzma-dev
+    ### HTSLIB
+    cd /opt/
+    wget https://github.com/samtools/htslib/releases/download/1.9/htslib-1.9.tar.bz2
+    tar -vxjf htslib-1.9.tar.bz2
+    cd htslib-1.9
+    make
+    ## Dependencies for MASH
+    apt-get install -y automake autoconf
+
+    # cpanm
+    apt install cpanminus -y
+    apt-get install liblwp-protocol-https-perl -y
+    cpanm --force LWP::Protocol::https
+    cpanm --force aliased
+    cpanm Tk
+    cpanm LWP::Simple
+    cpanm Modern::Perl
+    cpanm --force Bio::MUST::Core
     cpanm Bio::MUST::Drivers
     cpanm Bio::MUST::Apps::FortyTwo
 
-    #BMGE
+    # BMGE
     cd /opt/
     wget ftp://ftp.pasteur.fr:21/pub/gensoft/projects/BMGE/BMGE-1.12.tar.gz
     tar -xzf BMGE-1.12.tar.gz
@@ -85,8 +97,7 @@ Include: yum
     chmod a+x bmge.sh
     export PATH=/opt/BMGE-1.12:$PATH
 
-    #Programs
-    #bzip2
+    # bzip2
     wget https://sourceforge.net/projects/bzip2/files/latest/download
     mv download bzip2-1.0.6.tar.gz
     tar -xzf bzip2-1.0.6.tar.gz
@@ -94,34 +105,27 @@ Include: yum
     make
     make install
 
-    #HMMER
-    dnf install perl-Perl4-CoreLibs -y
-    dnf install perl-XML-Simple -y
-    cd /opt
-    wget http://eddylab.org/software/hmmer/hmmer-3.3.tar.gz
-    tar zxf hmmer-3.3.tar.gz
-    cd hmmer-3.3
-    ./configure --prefix /opt/hmmer
-    make
-    make check
-    make install
+    # HMMER 3
+    apt-get install -y hmmer
 
-    #Prodigal
+    # Prodigal
     cd /opt
     git clone https://github.com/hyattpd/Prodigal
     cd Prodigal/
     make install
 
-    #PPlacer
+    # PPlacer
     cd /opt
     wget https://github.com/matsen/pplacer/releases/download/v1.1.alpha17/pplacer-Linux-v1.1.alpha17.zip
     unzip pplacer-Linux-v1.1.alpha17.zip
 
-    #Checkm
+    # Checkm
     cd /opt
     pip3 install numpy
+    pip3 install Pillow
     pip3 install matplotlib
-    pip3 install -I pysam==0.12.0.1
+    pip3 install Cython
+    pip3 install pysam
     pip3 install checkm-genome
     mkdir checkm-data
     cd checkm-data/
@@ -129,7 +133,7 @@ Include: yum
     tar -xzf checkm_data_2015_01_16.tar.gz
     checkm data setRoot /opt/checkm-data/
 
-    #Mafft
+    # Mafft
     cd /opt/
     wget https://mafft.cbrc.jp/alignment/software/mafft-7.471-with-extensions-src.tgz
     gunzip -cd mafft-7.471-with-extensions-src.tgz | tar xfv -
@@ -139,17 +143,15 @@ Include: yum
     make
     make install
 
-    #MUSCLE
+    # MUSCLE
     cd /opt/
     mkdir muscle
     cd muscle/
     wget https://www.drive5.com/muscle/downloads3.8.31/muscle3.8.31_i86linux64.tar.gz
     tar -xzf muscle3.8.31_i86linux64.tar.gz
 
-    #Scafos
+    # Scafos
     cd /opt/
-    yum install -y perl-Tk #for centos7
-    #dnf --enablerepo=PowerTools install perl-Tk -y
     wget http://www.tree-puzzle.de/tree-puzzle-5.3.rc16.tar.gz
     tar -xzf tree-puzzle-5.3.rc16.tar.gz
     cd tree-puzzle-5.3.rc16
@@ -163,7 +165,7 @@ Include: yum
     tar -xzf scafos_src_linux.125.tgz
     export SCAFOS=/opt/scafos
   
-    #Mummer
+    # Mummer
     cd /opt/
     wget https://github.com/mummer4/mummer/releases/download/v3.9.4alpha/mummer-3.9.4alpha.tar.gz
     tar -xzf mummer-3.9.4alpha.tar.gz
@@ -172,22 +174,12 @@ Include: yum
     make
     make install
 
-    #Blast
+    # Blast
     cd /opt/    
     wget https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.10.0/ncbi-blast-2.10.0+-x64-linux.tar.gz
     tar -zxvf ncbi-blast-2.10.0+-x64-linux.tar.gz
 
-    #rnammer
-    #cd /opt
-    #mkdir rnammer
-    #cd rnammer
-    #cp ../rnammer-1.2.src.tar.gz .
-    #tar -xzf rnammer-1.2.src.tar.gz
-    #sed -i -e 's/\/usr\/cbs\/bio\/src\/rnammer-1.2/\/opt\/rnammer/g' rnammer
-    #sed -i -e 's/\/usr\/cbs\/bio\/bin\/linux64\/hmmsearch/\/opt\/hmmer\/bin\/hmmsearch/g' rnammer
-    #sed -i -e 's/\-\-\cpu\ 1//g' core-rnammer
-
-    #bedtools
+    # bedtools
     cd /opt/
     wget https://github.com/arq5x/bedtools2/releases/download/v2.29.1/bedtools-2.29.1.tar.gz
     tar -zxvf bedtools-2.29.1.tar.gz
@@ -195,18 +187,18 @@ Include: yum
     make
     export PATH=/opt/bedtools2/bin:$PATH
 
-    #barnap
+    # barnap
     cd /opt/
     git clone https://github.com/tseemann/barrnap.git
     export PATH=/opt/barrnap/bin:$PATH
 
-    #cd-hit
+    # cd-hit
     cd /opt/
     git clone https://github.com/weizhongli/cdhit
     cd cdhit/
     make
 
-    #RaxML
+    # RaxML
     cd /opt/
     git clone https://github.com/stamatak/standard-RAxML
     cd standard-RAxML/
@@ -214,16 +206,16 @@ Include: yum
     make -f Makefile.AVX.PTHREADS.gcc
     rm -f *.o
 
-    #capnp
+    # capnp
     cd /opt/
-    curl -O https://capnproto.org/capnproto-c++-0.8.0.tar.gz
+    wget https://capnproto.org/capnproto-c++-0.8.0.tar.gz
     tar zxf capnproto-c++-0.8.0.tar.gz
     cd capnproto-c++-0.8.0
     ./configure
     make -j6 check
     make install
 
-    #GSL
+    # GSL
     cd /opt/
     wget ftp://ftp.gnu.org/gnu/gsl/gsl-2.6.tar.gz
     tar -zxvf gsl-2.6.tar.gz
@@ -233,7 +225,7 @@ Include: yum
     make check
     make install
 
-    #Mash
+    # Mash
     cd /opt/
     git clone https://github.com/marbl/Mash
     cd Mash/
@@ -242,29 +234,39 @@ Include: yum
     make
     make install
 
-    #gANI
+    # gANI
     cd /opt/
     wget https://ani.jgi.doe.gov/download_files/ANIcalculator_v1.tgz
     tar -xzf ANIcalculator_v1.tgz
 
-    #dRep
+    # Dependencies for dRep
+    apt-get install -y libgsl-dev
+    cd /opt/
+    git clone https://github.com/ParBLiSS/FastANI
+    cd FastANI/
+    ./bootstrap.sh
+    ./configure --prefix=/opt/usr/local/
+    make
+    
+    # dRep
     pip3 install drep
 
-    #R
-    yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm
-    dnf install -y dnf-plugins-core
-    dnf config-manager --set-enabled powertools
-    curl -O https://cdn.rstudio.com/r/centos-8/pkgs/R-4.0.5-1-1.x86_64.rpm
-    yum install -y R-4.0.5-1-1.x86_64.rpm
+    # R
+    apt install -y dirmngr gnupg apt-transport-https ca-certificates software-properties-common
+    apt-get install -y add-apt-key
+    add-apt-key -k hkp://keyserver.ubuntu.com:80 E298A3A825C0D65DFD57CBB651716619E084DAB9
+    add-apt-repository 'deb https://cloud.r-project.org/bin/linux/ubuntu focal-cran40/'
+    apt install -y r-base
 
-    #treeshrink
+
+    # treeshrink
     cd /opt/
     git clone https://github.com/uym2/TreeShrink.git
     cd TreeShrink/
     python setup.py install
     run_treeshrink.py
 
-    #ORPER
+    # ORPER
     cd /opt/
     mkdir ORPER
     mv ORPER-companion.py ORPER/

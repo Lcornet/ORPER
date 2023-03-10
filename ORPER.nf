@@ -16,24 +16,27 @@ HELP SECTION
 //to state how to use the workflow
 //Can be as long as needed, no tabulation, only white-space here
 def helpMessage() {
-	log.info """
+    log.info """
 
     Description:
     ORPER performs a phylogenetic placement of SSU sequences in a tree, composed of RefSeq genomes, and 
     constrained by a ribosomal phylogenomic tree.
     
     Citation:
-    Please cite : 
+    Please cite : Cornet L, Ahn AC, Wilmotte A, Baurain D.
+    ORPER: A Workflow for Constrained SSU rRNA Phylogenies. Genes (Basel).
+    2021;12(11):1741. Published 2021 Oct 29. doi:10.3390/genes12111741
 
     Usage:
     
     The typical command for running the pipeline is as follows:
 
-    nextflow ORPER.nf --reftaxolevel=phylum --refgroup=Cyanobacteria --outtaxolevel=phylum 
-    --outgroup=Melainabacteria --outgenbank=yes --cpu=30 --SSU=SequencesULC4Luc.fasta 
-    -with-singularity ORPER.sif
+    nextflow ORPER.nf --kingdom=Bacteria --reftaxolevel=phylum --refgroup=Cyanobacteria 
+    --outtaxolevel=phylum --outgroup=Melainabacteria --outgenbank=yes --cpu=30 
+    --SSU=SequencesULC4Luc.fasta -with-singularity ORPER.sif
     
     Mandatory arguments:
+    --kingdom           Superkingdom of the group of interest - Choice between: Eukaryota or Bacteria
     --refgroup          Group of interest
     --outgroup          Outgroup
     --reftaxolevel      Taxonomic level of reference group - Choice between four taxa levels: phylum, class, order, family
@@ -42,8 +45,9 @@ def helpMessage() {
 
     Optional arguments:
     --ribodb            Path to directory containing ribodb fasta files - automatic setup by default
+    --eukccdb           Path to EukCC database directory - automatic setup by default
     --companion         Path to ORPER-companion.py 
-    --taxdump 		    Path to taxdump directory - automatic setup by default
+    --taxdump           Path to taxdump directory - automatic setup by default
     --cpu               Number of cpus, default = 1
     --genbank           Download GenBank metadata, activated by default - yes or no. Needed if refgenbank or outgenbank is activated
     --refgenbank        add GenBank for reference group, Deactivated by default - yes or no
@@ -69,34 +73,40 @@ INPUT AND OPTIONS SETTING
 */
 
 //Specified by user
+//Name of the Superkingdom : Mandatory
+params.kingdom = null
+if (params.kingdom == null) {
+    exit 1, "Kingdom is mandatory. You must choose between Eukaryota or Bacteria"
+}
+
 //Name of the Refgroup : Mandatory
 params.refgroup = null
 if (params.refgroup == null) {
-	exit 1, "RefSeq group mandatory,RefSeq group used to compute backdone of the tree"
+    exit 1, "RefSeq group mandatory,RefSeq group used to compute backdone of the tree"
 }
 
 //Name of the Outgroup : Mandatory
 params.outgroup = null
 if (params.outgroup == null) {
-	exit 1, "RefSeq group mandatory,RefSeq group used for outgroup"
+    exit 1, "RefSeq group mandatory,RefSeq group used for outgroup"
 }
 
 //Path to SSU fasta file : Mandatory
 params.SSU = null
 if (params.SSU == null) {
-	exit 1, "Path to fasta file containing SSU sequences"
+    exit 1, "Path to fasta file containing SSU sequences"
 }
 
 //Choice between four taxa levels for refgroup: phylum, class, order, family: Mandatory
 params.reftaxolevel = null
 if (params.reftaxolevel == null) {
-	exit 1, "Path to fasta file containing SSU sequences"
+    exit 1, "Path to fasta file containing SSU sequences"
 }
 
 //Choice between four taxa levels for outgroup: phylum, class, order, family: Mandatory
 params.outtaxolevel = null
 if (params.outtaxolevel == null) {
-	exit 1, "Path to fasta file containing SSU sequences"
+    exit 1, "Path to fasta file containing SSU sequences"
 }
 
 //Path to companion
@@ -104,6 +114,9 @@ params.companion = '/opt/ORPER/ORPER-companion.py'
 
 //Ribodb
 params.ribodb = 'local'
+
+//EukCCDB
+params.eukccdb = 'local'
 
 //Path to taxdump
 params.taxdump = 'local'
@@ -132,6 +145,10 @@ workingdir = file(taxdir)
 ribodir = "$workflow.projectDir" + '/ORPER-ribodb'
 workingribo = file(ribodir)
 
+//Path to project dir EukCCDB
+eukccdir = "$workflow.projectDir" + '/ORPER-eukccdb'
+workingeukcc = file(eukccdir)
+
 //outdir
 params.outdir='ORPER-results'
 
@@ -146,30 +163,30 @@ CORE PROGRAM
 
 //Load input files
 taxdump_ch = Channel.fromPath(params.taxdump)
-ribodb_ch = Channel.fromPath(params.ribodb)
-ssu_ch = Channel.fromPath(params.SSU)
+ribodb_ch  = Channel.fromPath(params.ribodb)
+eukccdb_ch = Channel.fromPath(params.eukccdb)
+ssu_ch     = Channel.fromPath(params.SSU)
 
 //Get ribodb files
 process RiboDBSetUp {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     val ribodb from ribodb_ch
     
     output:
     val ribodir into ribodir_ch1
     
-
     //script
     script:
 
-    ribo = 'na'
+    ribodir = 'na'
 
     if (params.ribodb == 'local'){
         println "ORPER-INFO: RiboDB not specified -> project dir"
 
-        if( !workingribo.exists() ) {
+        if ( !workingribo.exists() ) {
             println "ORPER-INFO: RiboDB dir not found in project dir -> Created"
             if( !workingribo.mkdirs() )    {
                 exit 1, "Cannot create working directory"
@@ -177,46 +194,112 @@ process RiboDBSetUp {
 
             ribodir = workingribo
 
+            path = 'na'
+            if (params.kingdom == 'Bacteria') {
+                path = 'prokaryotes/'
+            }
+
+            if (params.kingdom == 'Eukaryota') {
+                path = 'eukaryotes/'
+            }
+
             """
             cd $workingribo
-            git clone https://bitbucket.org/phylogeno/42-ribo-msas/src/master/MSAs/prokaryotes/
-            mv prokaryotes/MSAs/prokaryotes/*.ali .
+            git clone https://bitbucket.org/phylogeno/42-ribo-msas/
+            mv 42-ribo-msas/MSAs/$path/*.ali .
             ali2fasta.pl *.ali --degap 2> log
             find *.fasta | cut -f1 -d'.' > ribo.list
-            #for f in `cat ribo.list`; do mv \$f.fasta \$f-prot_abbr.fasta; done
             rm -f *.ali
             echo $workingribo > ribodb_path.txt
             """
         }
+
         else {
             println "ORPER-INFO: RiboDB dir found in project dir -> Used"
 
             ribodir = workingribo 
 
- 	        """
+            """
             echo $workingribo > ribodb_path.txt
-		    """           
+            """           
 
         }
     }
 
-	else{
+    else {
         println "ORPER-INFO: RiboDB specified"
 
         ribodir = ribodb
 
-		"""
+        """
         echo $ribodb > ribodb_path.txt
-		"""		
+        """		
     }
 }
 
+//Get EukCC database
+process EUKCCDBSetUp {
+    //informations
+
+    //input output
+    input:
+    val eukccdb from eukccdb_ch
+
+    output:
+    val eukccdir into eukccdir_ch1
+    val eukccdir into eukccdir_ch2
+
+    //script
+    script:
+
+    eukccdir = 'na'
+
+    if (params.eukccdb == 'local'){
+        println "ORPER-INFO: EukCC database directory not specified -> project dir"
+
+        if( !workingeukcc.exists() ) {
+            println "ORPER-INFO: EukCC database directory not found in project dir -> Created"
+            if( !workingeukcc.mkdirs() )    {
+                exit 1, "Cannot create working directory"
+            }
+
+            eukccdir = workingeukcc
+
+            """
+            wget http://ftp.ebi.ac.uk/pub/databases/metagenomics/eukcc/eukcc2_db_ver_1.2.tar.gz
+            tar -xzf eukcc2_db_ver_1.2.tar.gz
+            mkdir $workingeukcc/eukcc
+            mv eukcc2_db_ver_1.2 $workingeukcc/eukcc/
+            """
+        }
+
+        else {
+            println "ORPER-INFO: EukCC database directory found in project dir -> Used"
+
+            eukccdir = workingeukcc
+
+            """
+            echo $workingeukcc > eukccdb_path.txt
+            """
+        }
+    }
+
+    else {
+        println "ORPER-INFO: EukCC database specified"
+
+        eukccdir = eukccdb
+
+        """
+        echo $eukccdb > eukccdb_path.txt
+        """
+    }
+}
 
 //Taxonomy, set taxdump if not specifed
 process Taxonomy {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     val taxdump from taxdump_ch
     
@@ -247,34 +330,35 @@ process Taxonomy {
             echo $workingdir > taxdump_path.txt
             """
         }
+
         else {
             println "ORPER-INFO: Taxdump dir found in project dir -> Used"
 
             taxdir = workingdir 
 
- 	        """
+            """
             echo $workingdir > taxdump_path.txt
-		    """           
+            """           
 
         }
     }
 
-	else{
+    else {
         println "ORPER-INFO: Taxdump specified"
 
         taxdir = taxdump
 
-		"""
+        """
         echo $taxdump > taxdump_path.txt
-		"""		
+        """
     }
 }
 
 //Download RefSeq metadata, compute taxonomy file and prudce download ftp file
 process RefSeq {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file taxdump from taxdump_path1
     val companion from params.companion
@@ -311,7 +395,7 @@ process GenBank {
 
     //informations
 
-	//input output
+    //input output
     input:
     file taxdump from taxdump_path2
     val companion from params.companion
@@ -328,7 +412,8 @@ process GenBank {
         println "Add GenBank Genomes activated"
         """
         wget ftp://ftp.ncbi.nlm.nih.gov/genomes/genbank/assembly_summary_genbank.txt -O genbank_sum.txt
-        $companion genbank_sum.txt --mode=sum
+        #$companion genbank_sum.txt --mode=sum
+        cut -c20 genbank_sum.txt | grep -Pv '^na$' | tail -n+3 | head > genbank_sum-filt.txt
         grep -v "#" genbank_sum-filt.txt | cut -f1 > GCA.list
         fetch-tax.pl GCA.list  --taxdir=\$(<taxdump_path.txt) --item-type=taxid --levels=phylum class order family
         grep -v "#" genbank_sum-filt.txt | cut -f20 > ftp.list
@@ -357,9 +442,9 @@ process GenBank {
 //RefGroup part
 //Get Refseq genome for the reference group, abbr files
 process GetRefGenomesRefseq {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     val refgroup from params.refgroup
     val taxa from params.reftaxolevel
@@ -371,6 +456,7 @@ process GetRefGenomesRefseq {
     file '*-abbr.fna' into refgenomes_ch1
     file '*-abbr.fna' into refgenomes_ch2
     file '*-abbr.fna' into refgenomes_ch3
+    file '*-abbr.fna' into refgenomes_ch4
     file 'reduce-ftp.sh' into reduceRefFtp_ch
     file 'GCF.refgroup.uniq' into refgroupRefseqGC_ch
 
@@ -393,7 +479,7 @@ process GetRefGenomesGenbank {
 
     //informations
 
-	//input output
+    //input output
     input:
     val refgroup from params.refgroup
     val taxa from params.reftaxolevel
@@ -406,6 +492,7 @@ process GetRefGenomesGenbank {
     file '*-abbr.fna' into refgenomesGB_ch1
     file '*-abbr.fna' into refgenomesGB_ch2
     file '*-abbr.fna' into refgenomesGB_ch3
+    file '*-abbr.fna' into refgenomesGB_ch4
     file 'GCA-reduce-ftp.sh' into reduceRefFtpGB_ch
 
     //script
@@ -425,110 +512,166 @@ process GetRefGenomesGenbank {
         echo "Add GenBank Genomes activated" > FALSE-GCA-reduce-ftp.sh
         """
     }
+
     else {
         println "Add GenBank Genomes NOT activated"
         """
         echo "Add GenBank Genomes NOT activated" > FALSE-abbr.fna
         echo "Add GenBank Genomes NOT activated" > GCA-reduce-ftp.sh
         """
-
     }
 
 }
 
-//run contamination evaluation
-process RefGenomesCheckm {
-	//informations
+//run contamination evaluation for Bacteria
+process RefGenomesCheckM {
+    //informations
 
-	//input output
+    //input output
     input:
     file x from refgenomes_ch1
     file x from refgenomesGB_ch1
     val cpu from params.cpu
 
     output:
-    file "RefGenomes.Checkm" into refGenomesCheckm_ch
+    file "RefGenomes.checkm" into refGenomesContam_ch1
 
     //script
     script:
-
-    """
-    #Delete false Genbak files
-    rm -rf FALSE*
-    mkdir RefGenomes
-    mv *.fna RefGenomes/
-    checkm lineage_wf -t $cpu -x fna RefGenomes runc > checkm.result
-    echo "#genome,completeness,contamination" > part1
-    tr -s " " < checkm.result | grep "GC" | cut -f2,14,15 -d" " > part2
-    sed -i -e 's/ /,/g' part2
-    cat part1 part2 > RefGenomes.Checkm
-    """
+    if (params.kingdom == 'Bacteria') {
+        println "Contamination detection tool: CheckM"
+        """
+        #Delete false Genbak files
+        rm -rf FALSE*
+        rm -rf False*
+        mkdir RefGenomes
+        mv *.fna RefGenomes/
+        checkm lineage_wf -t $cpu -x fna RefGenomes runc > checkm.result
+        echo "#genome,completeness,contamination" > part1
+        tr -s " " < checkm.result | grep "GC" | cut -f2,14,15 -d" " > part2
+        sed -i -e 's/ /,/g' part2
+        cat part1 part2 > RefGenomes.checkm
+        """
+    }
+    
+    else {
+        println "CheckM not activated -> running EukCC"
+        """
+	echo "CheckM not activated" > RefGenomes.checkm
+        """
+    }
+    
 }
 
-//Run rnammer on all genomes
-process RefGenomesBarnapp  {
-	//informations
+//run contamination evaluation for Eukaryotes
+//TODO: add BUSCO
+process RefGenomesEukCC {
+    //informations
 
-	//input output
+    //input output
+    input:
+    file x from refgenomes_ch4
+    file x from refgenomesGB_ch4
+    val cpu from params.cpu
+    val eukccdir from eukccdir_ch1
+
+    output:
+    file "RefGenomes.eukcc" into refGenomesContam_ch2
+
+    //script
+    script:
+    if (params.kingdom == 'Eukaryota'){
+        println "Contamination detection tool: EukCC"
+        """
+        rm -rf FALSE*
+        rm -rf False*
+        mkdir bins
+        cd bins
+        for f in ../*.fna; do ln -s \$f; done
+        for FILE in *.fna; do mv \$FILE `basename \$FILE .fna`.fa
+        cd ../
+        eukcc folder bins --out eukcc_results --threads $cpu --db $eukccdir
+        cut -f1,2,3 eukcc_results/eukcc.csv | sed 's/bin/#genome/ ; s/.fa// ; s/\t/,/g' > RefGenomes.eukcc
+        """
+    }
+
+    else {
+        println "EukCC not activated -> running CheckM"
+        """
+	    echo "EukCC not activated" > RefGenomes.eukcc
+        """
+    }
+}
+
+//Run Barnapp on all genomes
+//TODO better handle SSU duplication
+process RefGenomesBarnapp  {
+    //informations
+
+    //input output
     input:
     file x from refgenomes_ch2
     file x from refgenomesGB_ch2
     val companion from params.companion
+    val kingdom   from params.kingdom
 
     output:
     file "genome-with-ssu.list" into refGenomeWithSsu_ch
-    file "all_16s-nodupe.fna" into refRnammer_ch
+    file "all_*S-nodupe.fna" into refRnammer_ch
 
     //script
     script:
-
+    
     """
     #Delete false Genbak files
     rm -rf FALSE*
+    rm -rf False*
     find *.fna | cut -f1 -d"-" > fna.list
     for f in `cat fna.list`; do barrnap \$f-abbr.fna --outseq \$f-barnap.fna --threads 1; done
-    #for f in `cat fna.list`; do fasta2ali.pl \$f-barnap.fna; done
-    #for f in `cat fna.list`; do grep -A1 '16S' \$f-barnap.ali > \$f-16s.ali; done
-    #for f in `cat fna.list`; do ali2fasta.pl \$f-16s.ali; mv \$f-16s.fasta \$f-16s.fna; done
     cat *barnap.fna > all_barnap.fna
-    $companion all_barnap.fna --mode=barnap
-    #cat *-16s.fna > all_16s.fna
-    #$companion all_16s.fna --mode=barnap
-    #RNAMMER
-    #for f in `cat fna.list`; do rnammer -S bac -m ssu -d -gff \$f.gff -h \$f.hmm -f `basename \$f .fa`_16s.fna < \$f-abbr.fna; done
-    #cat *_16s.fna > all_16s.fna
-    #$companion all_16s.fna --mode=rnammer
+    $companion all_barnap.fna --mode=barnap --kingdom=$kingdom
     """
 }
 
-
 //Filter genomes based on completeness, contamination and 16s presence
 process RefGenomesFilter {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file "genome-with-ssu.list" from refGenomeWithSsu_ch
-    file "RefGenomes.Checkm" from refGenomesCheckm_ch
+    file "RefGenomes.checkm" from refGenomesContam_ch1
+    file "RefGenomes.eukcc"  from refGenomesContam_ch2
     val companion from params.companion
 
     output:
     file "reliable-genomes.list" into refReliablegenomes_ch
-
+    
     //script
     script:
 
+    compl = 'na'
+    res   = 'na'
+    if (params.kingdom == 'Bacteria') {
+        compl = 90
+        res   = 'RefGenomes.checkm'
+    }
+
+    if (params.kingdom == 'Eukaryota') {
+        compl = 85
+        res   = 'RefGenomes.eukcc'
+    }
+
     """
-    $companion RefGenomes.Checkm --mode=checkm --ssu=yes
+    $companion $res --mode=checkm --ssu=yes --compl=$compl
     """
 }
 
 //Dereplication with drep : OPTIONAL
 process RefGenomesDereplication {
-
     //informations
 
-	//input output
+    //input output
     input:
     file x from refgenomes_ch3
     file x from refgenomesGB_ch3
@@ -552,21 +695,20 @@ process RefGenomesDereplication {
         mv reliable-genomes-dereplicated.list ../../
         """
     }
+
     else {
         println "Ref Genomes dereplication not activated"
         """
         cp reliable-genomes.list reliable-genomes-dereplicated.list
         """
-
     }
-
 }
 
 //Get proteomes of reliable genomes
 process GetRefRelProteomes {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file "reliable-genomes.list" from refDrepReliablegenomes_ch
     file 'reduce-ftp.sh' from reduceRefFtp_ch
@@ -595,9 +737,9 @@ process GetRefRelProteomes {
 //OutGroup part
 //Get Refseq genome for the out group, abbr files
 process GetOutGenomesRefSeq {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     val outgroup from params.outgroup
     val taxa from params.outtaxolevel
@@ -609,6 +751,7 @@ process GetOutGenomesRefSeq {
     file '*-abbr.fna' into outgenomes_ch1
     file '*-abbr.fna' into outgenomes_ch2
     file '*-abbr.fna' into outgenomes_ch3
+    file '*-abbr.fna' into outgenomes_ch4
     file 'reduce-ftp.sh' into reduceOutFtp_ch
     file 'GCF.outgroup.uniq' into outgroupRefseqGC_ch
 
@@ -636,7 +779,7 @@ process GetOutGenomesGenbank {
 
     //informations
 
-	//input output
+    //input output
     input:
     val outgroup from params.outgroup
     val taxa from params.outtaxolevel
@@ -649,6 +792,7 @@ process GetOutGenomesGenbank {
     file '*-abbr.fna' into outgenomesGB_ch1
     file '*-abbr.fna' into outgenomesGB_ch2
     file '*-abbr.fna' into outgenomesGB_ch3
+    file '*-abbr.fna' into outgenomesGB_ch4
     file 'GCA-reduce-ftp.sh' into reduceOutFtpGB_ch
 
     //script
@@ -676,82 +820,126 @@ process GetOutGenomesGenbank {
         echo "Add GenBank Genomes NOT activated" > FALSE-abbr.fna
         echo "Add GenBank Genomes NOT activated" > GCA-reduce-ftp.sh
         """
-
     }
-
 }
 
-//run contamination evaluation
-process OutGenomesCheckm {
-	//informations
+//run contamination evaluation for Bacteria
+process OutGenomesCheckM {
+    //informations
 
-	//input output
+    //input output
     input:
     file x from outgenomes_ch1
     file x from outgenomesGB_ch1
     val cpu from params.cpu
 
     output:
-    file "OutGenomes.Checkm" into outGenomesCheckm_ch
+    file "OutGenomes.checkm" into outGenomesContam_ch1
 
     //script
     script:
+    if (params.kingdom == 'Bacteria') {
+        println "Contamination detection tool: CheckM"
+        """
+        rm -f False*
+        rm -f FALSE*
+        mkdir OutGenomes
+        mv *.fna OutGenomes/
+        checkm lineage_wf -t $cpu -x fna OutGenomes runc > checkm.result
+        echo "#genome,completeness,contamination" > part1
+        tr -s " " < checkm.result | grep "GC" | cut -f2,14,15 -d" " > part2
+        sed -i -e 's/ /,/g' part2
+        cat part1 part2 > OutGenomes.checkm
+        """
+    }
+    
+    else {
+        println "CheckM not activated -> running EukCC"
+        """
+	echo "CheckM not activated" > OutGenomes.checkm
+        """
+    }
+    
+}
 
-    """
-    #pyenv local 2.7.6
-    #delete false file
-    rm -f False*
-    rm -f FALSE*
-    mkdir OutGenomes
-    mv *.fna OutGenomes/
-    checkm lineage_wf -t $cpu -x fna OutGenomes runc > checkm.result
-    echo "#genome,completeness,contamination" > part1
-    tr -s " " < checkm.result | grep "GC" | cut -f2,14,15 -d" " > part2
-    sed -i -e 's/ /,/g' part2
-    cat part1 part2 > OutGenomes.Checkm
-    """
+//run contamination evaluation for Eukaryotes
+//TODO: add BUSCO
+process OutGenomesEukCC {
+    //informations
+
+    //input output
+    input:
+    file x from outgenomes_ch4
+    file x from outgenomesGB_ch4
+    val cpu from params.cpu
+    val eukccdir from eukccdir_ch2
+
+    output:
+    file "OutGenomes.eukcc" into outGenomesContam_ch2
+
+    //script
+    script:
+    if (params.kingdom == 'Eukaryota'){
+        println "Contamination detection tool: EukCC"
+        """
+        rm -rf FALSE*
+        rm -rf False*
+        mkdir bins
+        cd bins
+        for f in ../*.fna; do ln -s \$f; done
+        for FILE in *.fna; do mv \$FILE `basename \$FILE .fna`.fa
+        cd ../
+        eukcc folder bins --out eukcc_results --threads $cpu --db $eukccdir
+        cut -f1,2,3 eukcc_results/eukcc.csv | sed 's/bin/#genome/ ; s/.fa// ; s/\t/,/g' > OutGenomes.eukcc
+        """
+    }
+
+    else {
+        println "EukCC not activated -> running CheckM"
+        """
+        echo "EukCC not activated" > OutGenomes.eukcc
+        """
+    }
 }
 
 //Run rnammer on all genomes
 process OutGenomesBarnap  {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file x from outgenomes_ch2
     file x from outgenomesGB_ch2
     val companion from params.companion
+    val kingdom   from params.kingdom
 
     output:
     file "genome-with-ssu.list" into outGenomeWithSsu_ch
-    file "all_16s-nodupe.fna" into outRnammer_ch
+    file "all_*S-nodupe.fna" into outRnammer_ch
 
     //script
     script:
 
     """
     #delete false file
-    rm -f False*
     rm -f FALSE*
+    rm -f False*
     find *.fna | cut -f1 -d"-" > fna.list
     for f in `cat fna.list`; do barrnap \$f-abbr.fna --outseq \$f-barnap.fna --threads 1; done
-    #for f in `cat fna.list`; do fasta2ali.pl \$f-barnap.fna; done
-    #for f in `cat fna.list`; do grep -A1 '16S' \$f-barnap.ali > \$f-16s.ali; done
-    #for f in `cat fna.list`; do ali2fasta.pl \$f-16s.ali; mv \$f-16s.fasta \$f-16s.fna; done
-    #cat *-16s.fna > all_16s.fna
     cat *barnap.fna > all_barnap.fna
-    $companion all_barnap.fna --mode=barnap
+    $companion all_barnap.fna --mode=barnap --kingdom=$kingdom
     """
 }
 
 //Filter genomes based on completeness, contamination and 16s presence
 process OutGenomesFilter {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file "genome-with-ssu.list" from outGenomeWithSsu_ch
-    file "OutGenomes.Checkm" from outGenomesCheckm_ch
+    file "OutGenomes.checkm" from outGenomesContam_ch1
+    file "OutGenomes.eukcc"  from outGenomesContam_ch2
     val companion from params.companion
 
     output:
@@ -760,16 +948,28 @@ process OutGenomesFilter {
     //script
     script:
 
+    compl = 'na'
+    file  = 'na'
+    if (params.kingdom == 'Bacteria') {
+        compl = 90
+        file  = "OutGenomes.checkm"
+    }
+
+    if (params.kingdom == 'Eukaryota') {
+        compl = 85
+        file  = "OutGenomes.eukcc"
+    }
+
     """
-    $companion OutGenomes.Checkm --mode=checkm --ssu=yes
+    $companion $file --mode=checkm --ssu=yes --compl=$compl
     """
 }
 
 //Get proteomes of reliable genomes
 process GetOutRelProteomes {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file "reliable-genomes.list" from outReliablegenomes_ch
     file 'reduce-ftp.sh' from reduceOutFtp_ch
@@ -802,9 +1002,9 @@ process GetOutRelProteomes {
 //Common part :  Ref and Out group
 //Run forty to enrich ribodb with reference genomes
 process RiboDBFortytwo {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     val cpu from params.cpu
     file x from refReliableproteomes_ch
@@ -820,101 +1020,164 @@ process RiboDBFortytwo {
     //script
     script:
 
-    """
-    #Reference organism part 
-    mkdir ref-banks
-    cd ref-banks/
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/022/565/GCA_000022565.1_ASM2256v1/GCA_000022565.1_ASM2256v1_protein.faa.gz -O GCA_000022565.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/019/605/GCA_000019605.1_ASM1960v1/GCA_000019605.1_ASM1960v1_protein.faa.gz -O GCA_000019605.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/956/175/GCA_000956175.1_ASM95617v1/GCA_000956175.1_ASM95617v1_protein.faa.gz -O GCA_000956175.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/024/005/GCA_000024005.1_ASM2400v1/GCA_000024005.1_ASM2400v1_protein.faa.gz -O GCA_000024005.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/026/905/GCA_000026905.1_ASM2690v1/GCA_000026905.1_ASM2690v1_protein.faa.gz -O GCA_000026905.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/026/545/GCA_000026545.1_ASM2654v1/GCA_000026545.1_ASM2654v1_protein.faa.gz -O GCA_000026545.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/145/985/GCA_000145985.1_ASM14598v1/GCA_000145985.1_ASM14598v1_protein.faa.gz -O GCA_000145985.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/165/505/GCA_000165505.1_ASM16550v1/GCA_000165505.1_ASM16550v1_protein.faa.gz -O GCA_000165505.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/008/085/GCA_000008085.1_ASM808v1/GCA_000008085.1_ASM808v1_protein.faa.gz -O GCA_000008085.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/698/785/GCA_000698785.1_ASM69878v1/GCA_000698785.1_ASM69878v1_protein.faa.gz -O GCA_000698785.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/725/425/GCA_000725425.1_ASM72542v1/GCA_000725425.1_ASM72542v1_protein.faa.gz -O GCA_000725425.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/091/725/GCA_000091725.1_ASM9172v1/GCA_000091725.1_ASM9172v1_protein.faa.gz -O GCA_000091725.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/011/505/GCA_000011505.1_ASM1150v1/GCA_000011505.1_ASM1150v1_protein.faa.gz -O GCA_000011505.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/012/285/GCA_000012285.1_ASM1228v1/GCA_000012285.1_ASM1228v1_protein.faa.gz -O GCA_000012285.1.faa.gz
-    wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/014/585/GCA_000014585.1_ASM1458v1/GCA_000014585.1_ASM1458v1_protein.faa.gz -O GCA_000014585.1.faa.gz
-    gunzip *.gz
-    find *.faa | cut -f1,2 -d"." > faa.list
-    for f in `cat faa.list`; do makeblastdb -in \$f.faa -dbtype prot -parse_seqids -out \$f; done
-    for f in `cat faa.list `; do echo ".psq" ; done > end.list
-    paste faa.list end.list > part1
-    sed -i -e 's/\t//g' part1
-    #paste part1 faa.list > ref-bank-mapper.idm
-    paste faa.list part1 > ref-bank-mapper.idm
-    cd ..
+    if (params.kingdom == 'Bacteria') {
+        println "Running prokaryotic FortyTwo"
+        """
+        #Reference organism part 
+        mkdir ref-banks
+        cd ref-banks/
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/022/565/GCA_000022565.1_ASM2256v1/GCA_000022565.1_ASM2256v1_protein.faa.gz -O GCA_000022565.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/019/605/GCA_000019605.1_ASM1960v1/GCA_000019605.1_ASM1960v1_protein.faa.gz -O GCA_000019605.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/956/175/GCA_000956175.1_ASM95617v1/GCA_000956175.1_ASM95617v1_protein.faa.gz -O GCA_000956175.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/024/005/GCA_000024005.1_ASM2400v1/GCA_000024005.1_ASM2400v1_protein.faa.gz -O GCA_000024005.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/026/905/GCA_000026905.1_ASM2690v1/GCA_000026905.1_ASM2690v1_protein.faa.gz -O GCA_000026905.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/026/545/GCA_000026545.1_ASM2654v1/GCA_000026545.1_ASM2654v1_protein.faa.gz -O GCA_000026545.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/145/985/GCA_000145985.1_ASM14598v1/GCA_000145985.1_ASM14598v1_protein.faa.gz -O GCA_000145985.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/165/505/GCA_000165505.1_ASM16550v1/GCA_000165505.1_ASM16550v1_protein.faa.gz -O GCA_000165505.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/008/085/GCA_000008085.1_ASM808v1/GCA_000008085.1_ASM808v1_protein.faa.gz -O GCA_000008085.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/698/785/GCA_000698785.1_ASM69878v1/GCA_000698785.1_ASM69878v1_protein.faa.gz -O GCA_000698785.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/725/425/GCA_000725425.1_ASM72542v1/GCA_000725425.1_ASM72542v1_protein.faa.gz -O GCA_000725425.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/091/725/GCA_000091725.1_ASM9172v1/GCA_000091725.1_ASM9172v1_protein.faa.gz -O GCA_000091725.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/011/505/GCA_000011505.1_ASM1150v1/GCA_000011505.1_ASM1150v1_protein.faa.gz -O GCA_000011505.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/012/285/GCA_000012285.1_ASM1228v1/GCA_000012285.1_ASM1228v1_protein.faa.gz -O GCA_000012285.1.faa.gz
+        wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/014/585/GCA_000014585.1_ASM1458v1/GCA_000014585.1_ASM1458v1_protein.faa.gz -O GCA_000014585.1.faa.gz
+        gunzip *.gz
+        find *.faa | cut -f1,2 -d"." > faa.list
+        for f in `cat faa.list`; do makeblastdb -in \$f.faa -dbtype prot -parse_seqids -out \$f; done
+        #for f in `cat faa.list `; do echo ".psq" ; done > end.list
+        #paste faa.list end.list > part1
+        #sed -i -e 's/\t//g' part1
+        #paste part1 faa.list > ref-bank-mapper.idm
+        #paste faa.list part1 > ref-bank-mapper.idm
+        paste faa.list faa.list > ref-bank-mapper.idm
+        cd ..
 
-    #Define Queries
-    echo "Sulfolobus solfataricus_2287" >> queries.idl
-    echo "Thermoproteus uzoniensis_999630" >> queries.idl
-    echo "Vulcanisaeta moutnovskia_985053" >> queries.idl
-    echo "Flavobacterium psychrophilum_96345" >> queries.idl
-    echo "Brucella suis_645170" >> queries.idl
-    echo "Burkholderia mallei_13373" >> queries.idl
-    echo "Neisseria meningitidis_487" >> queries.idl
-    echo "Helicobacter pylori_210" >> queries.idl
-    echo "Escherichia coli_83333" >> queries.idl
-    echo "Yersinia pestis_632" >> queries.idl
-    echo "Pseudomonas aeruginosa_287" >> queries.idl
-    echo "Francisella philomiragia_28110" >> queries.idl
-    echo "Xanthomonas citri_611301" >> queries.idl
-    echo "Chlamydia pneumoniae_83558" >> queries.idl
-    echo "Corynebacterium pseudotuberculosis_1719" >> queries.idl
-    echo "Mycobacterium tuberculosis_1773" >> queries.idl
-    echo "Bacillus anthracis_1392" >> queries.idl
-    echo "Listeria monocytogenes_1639" >> queries.idl
-    echo "Staphylococcus aureus_1074919" >> queries.idl
-    echo "Streptococcus agalactiae_1311" >> queries.idl
+        #Define Queries
+        echo "Sulfolobus solfataricus_2287" >> queries.idl
+        echo "Thermoproteus uzoniensis_999630" >> queries.idl
+        echo "Vulcanisaeta moutnovskia_985053" >> queries.idl
+        echo "Flavobacterium psychrophilum_96345" >> queries.idl
+        echo "Brucella suis_645170" >> queries.idl
+        echo "Burkholderia mallei_13373" >> queries.idl
+        echo "Neisseria meningitidis_487" >> queries.idl
+        echo "Helicobacter pylori_210" >> queries.idl
+        echo "Escherichia coli_83333" >> queries.idl
+        echo "Yersinia pestis_632" >> queries.idl
+        echo "Pseudomonas aeruginosa_287" >> queries.idl
+        echo "Francisella philomiragia_28110" >> queries.idl
+        echo "Xanthomonas citri_611301" >> queries.idl
+        echo "Chlamydia pneumoniae_83558" >> queries.idl
+        echo "Corynebacterium pseudotuberculosis_1719" >> queries.idl
+        echo "Mycobacterium tuberculosis_1773" >> queries.idl
+        echo "Bacillus anthracis_1392" >> queries.idl
+        echo "Listeria monocytogenes_1639" >> queries.idl
+        echo "Staphylococcus aureus_1074919" >> queries.idl
+        echo "Streptococcus agalactiae_1311" >> queries.idl
 
-    #Part for genomes to add
-    mkdir genomes-to-add
-    mv *abbr.faa genomes-to-add/
-    cd genomes-to-add/
-    find *.faa | cut -f1 -d"-" > genomes.list
-    for f in `cat genomes.list`; do makeblastdb -in \$f-abbr.faa -dbtype prot -parse_seqids -out \$f; done
-    for f in `cat genomes.list`; do echo ".psq"; done  > end.list
-    paste genomes.list end.list > part1
-    sed -i -e 's/\t//g' part1
-    find *abbr.faa | cut -f1,2 -d"." > part2
-    #paste part1 part2 > bank-mapper.idm
-    paste part2 part1 > bank-mapper.idm
-    cd ..
-   
-    #Part for alignements
-    mkdir ribodb
-    cp $ribodir/*.fasta ribodb/
-    
-    #Generate yaml
-    yaml-generator-42.pl --run_mode=phylogenomic --out_suffix=-ORPER --queries queries.idl --evalue=1e-05 --homologues_seg=yes \
-    --max_target_seqs=10000 --templates_seg=no --bank_dir genomes-to-add --bank_suffix=.psq --bank_mapper genomes-to-add/bank-mapper.idm --ref_brh=on \
-    --ref_bank_dir ref-banks --ref_bank_suffix=.psq --ref_bank_mapper ref-banks/ref-bank-mapper.idm --ref_org_mul=0.3 --ref_score_mul=0.99 \
-    --trim_homologues==off --ali_keep_lengthened_seqs=keep --aligner_mode=off --tax_reports=off --tax_dir $taxdir \
-    --megan_like --tol_check=off
+        #Part for genomes to add
+        mkdir genomes-to-add
+        mv *abbr.faa genomes-to-add/
+        cd genomes-to-add/
+        find *.faa | cut -f1 -d"-" > genomes.list
+        for f in `cat genomes.list`; do makeblastdb -in \$f-abbr.faa -dbtype prot -parse_seqids -out \$f; done
+        #for f in `cat genomes.list`; do echo ".psq"; done  > end.list
+        #paste genomes.list end.list > part1
+        #sed -i -e 's/\t//g' part1
+        #find *abbr.faa | cut -f1,2 -d"." > part2
+        #paste part1 part2 > bank-mapper.idm
+        #paste part2 part1 > bank-mapper.idm
+        paste genomes.list genomes.list > bank-mapper.idm
+        cd ..
 
-    #run forty-two
-    forty-two.pl ribodb/*.fasta --config=config-ORPER.yaml --verbosity=1 --threads=$cpu
+        #Part for alignements
+        mkdir ribodb
+        cp $ribodir/*.fasta ribodb/
 
-    #extract new sequences from enriched ribodb
-    cd ribodb/
-    fasta2ali.pl *-ORPER.fasta
-    grep -c "#NEW" *ORPER.fasta > count-enrich.list
-    $companion count-enrich.list --mode=forty
-    for f in `cat enrich.list`; do grep -A1 "#NEW#" \$f.ali > \$f-enrich.ali; done
-    ali2fasta.pl --degap --noguessing *enrich.ali
-    mv *enrich.fasta ../
-    cd ..
-    """
+        #Generate yaml
+        yaml-generator-42.pl --run_mode=phylogenomic --out_suffix=-ORPER --queries queries.idl --evalue=1e-05 --homologues_seg=yes \
+        --max_target_seqs=10000 --templates_seg=no --bank_dir genomes-to-add --bank_suffix=.psq --bank_mapper genomes-to-add/bank-mapper.idm --ref_brh=on \
+        --ref_bank_dir ref-banks --ref_bank_suffix=.psq --ref_bank_mapper ref-banks/ref-bank-mapper.idm --ref_org_mul=0.3 --ref_score_mul=0.99 \
+        --trim_homologues=off --ali_keep_lengthened_seqs=keep --aligner_mode=off --tax_reports=off --tax_dir $taxdir \
+        --megan_like --tol_check=off
+
+        #run forty-two
+        forty-two.pl ribodb/*.fasta --config=config-ORPER.yaml --verbosity=1 --threads=$cpu
+
+        #extract new sequences from enriched ribodb
+        cd ribodb/
+        fasta2ali.pl *-ORPER.fasta
+        grep -c "#NEW" *ORPER.fasta > count-enrich.list
+        $companion count-enrich.list --mode=forty
+        for f in `cat enrich.list`; do grep -A1 "#NEW#" \$f.ali > \$f-enrich.ali; done
+        ali2fasta.pl --degap --noguessing *enrich.ali
+        mv *enrich.fasta ../
+        cd ..
+        """
+    }
+
+    else if (params.kingdom == 'Eukaryota')  {
+        println "Running eukaryotic FortyTwo"
+        """
+        #Reference organism part
+        mkdir ref-banks
+        cd ref-banks/
+        git clone https://bitbucket.org/phylogeno/42-ribo-msas/
+        mv 42-ribo-msas/ref_orgs/eukaryotes/*.faa ./
+        for REFORG in *.faa; do makeblastdb -in \$REFORG -dbtype prot -out `basename \$REFORG .faa` -parse_seqids; done
+        mv 42-ribo-msas/ref_orgs/eukaryotes/mapper-eukaryotes.idm ./
+        #sed 's/d99/d99.faa/' mapper-eukaryotes.idm > mapper-eukaryotes-psq.idm
+        cd ..
+
+        #Define Queries
+        grep -h '>' $ribodir/*.fasta | cut -f1 -d'@' | sort | uniq -c | sort -rh \
+        | tail -n+2 | head -50 | cut -f2 -d'>' | sed 's/_/ /' > queries.idl
+
+        #Part for genomes to add
+        mkdir genomes-to-add
+        mv *abbr.faa genomes-to-add/
+        cd genomes-to-add/
+        find *.faa | cut -f1 -d"-" > genomes.list
+        for f in `cat genomes.list`; do makeblastdb -in \$f-abbr.faa -dbtype prot -parse_seqids -out \$f; done
+        #for f in `cat genomes.list`; do echo ".psq"; done  > end.list
+        #paste genomes.list end.list > part1
+        #sed -i -e 's/\t//g' part1
+        #find *abbr.faa | cut -f1,2 -d"." > part2
+        #paste part1 part2 > bank-mapper.idm
+        #paste part2 part1 > bank-mapper.idm
+        paste genomes.list genomes.list > bank-mapper.idm
+        cd ..
+
+        #Part for alignements
+        mkdir ribodb
+        cp $ribodir/*.fasta ribodb/
+
+        #Generate yaml
+        yaml-generator-42.pl --run_mode=phylogenomic --out_suffix=-ORPER --queries queries.idl --evalue=1e-05 --homologues_seg=yes \
+        --max_target_seqs=10000 --templates_seg=no --bank_dir genomes-to-add --bank_suffix=.psq --bank_mapper genomes-to-add/bank-mapper.idm --ref_brh=on \
+        --ref_bank_dir ref-banks --ref_bank_suffix=.psq --ref_bank_mapper ref-banks/mapper-eukaryotes.idm --ref_org_mul=0.15 --ref_score_mul=0.99 \
+        --trim_homologues=off --ali_keep_lengthened_seqs=keep --aligner_mode=off --tax_reports=off --tax_dir $taxdir \
+        --megan_like --tol_check=off
+
+        #run forty-two
+        forty-two.pl ribodb/*.fasta --config=config-ORPER.yaml --verbosity=1 --threads=$cpu
+
+        #extract new sequences from enriched ribodb
+        cd ribodb/
+        fasta2ali.pl *-ORPER.fasta
+        grep -c "#NEW" *ORPER.fasta > count-enrich.list
+        $companion count-enrich.list --mode=forty
+        for f in `cat enrich.list`; do grep -A1 "#NEW#" \$f.ali > \$f-enrich.ali; done
+        ali2fasta.pl --degap --noguessing *enrich.ali
+        mv *enrich.fasta ../
+        cd ..
+        """
+    }
 }
 
 process AlignmentMUSCLE {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file '*enrich.fasta' from enrichedRiboDB_ch
 
@@ -935,9 +1198,9 @@ process AlignmentMUSCLE {
 
 
 process ConcatScafos {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file '*enrich-ali.fasta' from alignments_ch
 
@@ -969,9 +1232,9 @@ process ConcatScafos {
 }
 
 process ReferenceTreeRaxml {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file 'data-ass.ali' from matrix_ch
     val cpu from params.cpu
@@ -1001,12 +1264,12 @@ process ReferenceTreeRaxml {
     """
 }
 
-//Dereplication of provided 16s file : OPTIONAL
+//Dereplication of provided SSU file : OPTIONAL
 process SSUDereplication {
 
     //informations
 
-	//input output
+    //input output
     input:
     file 'SSU.fasta' from ssu_ch
     val cpu from params.cpu
@@ -1022,26 +1285,26 @@ process SSUDereplication {
         cd-hit -i SSU.fasta -o derepliacted-SSU.fasta -c 1.0 -T $cpu
         """
     }
+
     else {
         println "SSU CD-HIT dereplication not activated"
         """
         cp SSU.fasta derepliacted-SSU.fasta
         """
-
     }
 
 }
 
 
-//compute the 16s alignement and the constrained tree
+//compute the SSU alignement and the constrained tree
 process ConstrainTreeRaxml {
-	//informations
+    //informations
 
-	//input output
+    //input output
     input:
     file 'reference.tre' from referenceTree_ch
-    file "Refall_16s-nodupe.fna" from refRnammer_ch
-    file "Outall_16s-nodupe.fna" from outRnammer_ch
+    file "Refall_*S-nodupe.fna" from refRnammer_ch
+    file "Outall_*S-nodupe.fna" from outRnammer_ch
     file 'SSU.fasta' from ssuDereplicated_ch
     file 'GC.list' from referenceTreeList_ch
     val taxdir from taxdir_ch2
@@ -1071,8 +1334,8 @@ process ConstrainTreeRaxml {
 
     #Process refgroup 16s sequences -- to replace in companion --
     #ensure that rejected sequence in scafos are not present in reference 16s file
-    cat Refall_16s-nodupe.fna Outall_16s-nodupe.fna > all_16s-nodupe.fasta
-    $companion all_16s-nodupe.fasta --mode=ConstrainTreeRaxml
+    cat Refall_*S-nodupe.fna Outall_*S-nodupe.fna > all_16s-nodupe.fasta
+    $companion all_*S-nodupe.fasta --mode=ConstrainTreeRaxml
     
     #combine reference ans SSU, fasta files
     cat all_16s-nodupe-list.fasta SSU-abbr.fasta > SSU-combined.fasta
@@ -1091,7 +1354,7 @@ process ConstrainTreeRaxml {
     #Delete long branch
     cp RAxML_bipartitions.SSU-combined-ali-a2p-RAXML-GTRGAMMA-100xRAPIDBP raxml.tre
     run_treeshrink.py -t raxml.tre
-    grep ">" Outall_16s-nodupe.fna | cut -f2 -d'>' >  Out-GCA.list
+    grep ">" Outall_*S-nodupe.fna | cut -f2 -d'>' >  Out-GCA.list
     cp raxml_treeshrink/output_summary.txt .
     $companion output_summary.txt --mode=shrink --shrinkvalue=$shrink
     cp RAxML_bipartitions.SSU-combined-ali-a2p-RAXML-GTRGAMMA-100xRAPIDBP Constained-tree.tre
@@ -1120,10 +1383,10 @@ process ConstrainTreeRaxml {
 
 //output the results
 process PublicationResults {
-	//informations
+    //informations
     publishDir "$params.outdir", mode: 'copy', overwrite: false
 
-	//input output
+    //input output
     input:
     file 'Constained-tree.nex' from constTreeNexus_ch
     file 'Constained-tree.tre' from constTreeTre_ch
@@ -1150,7 +1413,3 @@ process PublicationResults {
     echo "ORPER analyses completed" > log
     """
 }
-
-
-
-

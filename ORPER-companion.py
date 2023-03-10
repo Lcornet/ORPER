@@ -16,15 +16,18 @@ import click
 #main file - depending of the mode can be checkm result or rnammer output
 @click.argument('main_file', type=click.Path(exists=True,readable=True))
 #taxid
-@click.option('--mode', default='no', help='rnammer or checkm mode')
-@click.option('--ssu', default='no', help='delete genomes that without ssu : yes or no')
+@click.option('--kingdom', default='no', help='choose between 16S RNA or 28S RNA for barnap: Bacteria or Eukaryota')
+@click.option('--mode', default='no', help='barnap or rnammer or checkm mode')
+@click.option('--ssu', default='no', help='delete genomes that without ssu: yes or no')
 @click.option('--taxa', default='no', help='Choice between four taxa levels: phylum, class, order, family')
 @click.option('--refgroup', default='no', help='Name of the refence group')
-@click.option('--shrinkvalue', default='0.5', help='Three shrink cutoff value')
+@click.option('--shrinkvalue', type=float, default='0.5', show_default=True, help='Three shrink cutoff value')
+@click.option('--compl', type=float, default='90.0', show_default=True, help='Completeness threshold value')
+@click.option('--contam', type=float, default='5.0', show_default=True, help='Contamination threshold value')
 
-def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
-		
-	#read fasta file
+def main(main_file, kingdom, mode, ssu, taxa, refgroup, shrinkvalue, compl, contam):
+
+    #read fasta file
 
     if (mode == 'rnammer'):
         #Read ssu file and register GCF
@@ -55,16 +58,22 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                 if (check_print == 'activated'):
                     SSU_out.write(ssu_record + "\n")
 
-        #Print results 
+        #Print results
         for GCF in GCF_of:
             rnammer_out.write(GCF + "\n")
 
     if (mode == 'barnap'):
+        #Set up SSU RNA
+        rna = None
+        if (kingdom == 'Bacteria'):
+            rna = '16S'
+        if (kingdom == 'Eukaryota'):
+            rna = '28S'
         #Read ssu file and register GCF
         GCF_of = {}
         infile_ssu = open(main_file)
         rnammer_out = open("genome-with-ssu.list", "w")
-        SSU_out = open("all_16s-nodupe.fna", "w")
+        SSU_out = open("all_{}-nodupe.fna".format(rna), "w")
         check_print = 'disabled'
 
         for line in infile_ssu:
@@ -72,12 +81,12 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
             if ('>' in ssu_record) :
                 #By default activated check print
                 check_print = 'disabled'
-                if ('16S' in ssu_record):
+                if (rna in ssu_record):
                     check_print = 'activated'
                 #In the deflines-get GCF
                 split_list = ssu_record.split("|")
                 GCF = split_list[0]
-                GCF = GCF.replace(">16S_rRNA::", "")
+                GCF = GCF.replace(">{}_rRNA::".format(rna), "")
                 #skip the rest and don't store/print if GCF already seen
                 if GCF in GCF_of:
                     check_print = 'disabled'
@@ -91,10 +100,10 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                     SSU_out.write(ssu_record + "\n")
 
 
-        #Print results 
+        #Print results
         for GCF in GCF_of:
             rnammer_out.write(GCF + "\n")
-    
+
     elif (mode == 'checkm'):
         #define
         file_lists = []
@@ -107,7 +116,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
 
         for line in infile:
             checkm_record = line.replace("\n", "")
-        
+
             #header
             if '#' in checkm_record:
                 continue
@@ -120,9 +129,9 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
             Conta = float(split_list[2])
 
             #criteria of filtration
-            if ((Compl > 90) and (Conta < 5)):
+            if ((Compl > compl) and (Conta < contam)):
                 file_lists.append(GCF)
-        
+
         #print result
         if (ssu == 'yes'):
             #delete genomes with ssu
@@ -161,7 +170,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
         #print results
         for name in file_lists:
             forty_out.write(name + "\n")
-    
+
     elif (mode == 'sum'):
         #define if it's from genbank or refseq
         origin = main_file
@@ -183,7 +192,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                     link = split_list[19]
                     if (link != 'na'):
                         sum_out.write(sum_record + "\n")
-        
+
         elif (origin == 'genbank'):
             #outfile
             sum_out = open("genbank_sum-filt.txt", "w")
@@ -201,7 +210,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                     link = split_list[19]
                     if (link != 'na'):
                         sum_out.write(sum_record + "\n")
-    
+
     elif (mode == 'fetch'):
         #define if it's from genbank or refseq
         origin = main_file
@@ -223,7 +232,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                 #separate taxa taxonomic levels
                 if (';' not in levels):
                     continue
-                else: 
+                else:
                     split_list = levels.split(";")
                     phylum = split_list[0]
                     phylum = phylum.replace(" ", "")
@@ -250,12 +259,12 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                         group = family
                         if (refgroup in group):
                             GCFlist_of[GC] = 1
-            
+
             #print GC list
             fetch_out = open("GCF.refgroup.uniq", "w")
             for GC in GCFlist_of:
                 fetch_out.write(str(GC) + "\n")
-        
+
         elif (origin == "GCA"):
             #open refgroupRefseqGC to lod ids of refseq genomes already in the db
             refseqList = open('GCF.refgroup.uniq')
@@ -282,7 +291,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                 #separate taxa taxonomic levels
                 if (';' not in levels):
                     continue
-                else: 
+                else:
                     split_list = levels.split(";")
                     phylum = split_list[0]
                     phylum = phylum.replace(" ", "")
@@ -309,14 +318,14 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
                         group = family
                         if ((refgroup in group) and (ID not in GCFlist_of)):
                             GCAlist_of[GC] = 1
-            
+
             #print GC list
             fetch_out = open("GCA.refgroup.uniq", "w")
             for GC in GCAlist_of:
                 fetch_out.write(str(GC) + "\n")
 
     elif (mode == 'ConstrainTreeRaxml'):
-        
+
         #open list of GC ids
         GC_infile = open('GC.list')
         GClist_of = {}
@@ -329,7 +338,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
 
         #Open out file
         GC_out = open("all_16s-nodupe-list.fasta", "w")
-        
+
         tag = 0
         for line in infile:
             GC_record = line.replace("\n", "")
@@ -383,7 +392,7 @@ def main(main_file, mode, ssu, taxa, refgroup, shrinkvalue):
 
 
 
-            
+
 
 if __name__ == '__main__':
     main()
