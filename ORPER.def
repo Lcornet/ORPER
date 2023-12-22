@@ -31,6 +31,7 @@ MirrorURL: http://us.archive.ubuntu.com/ubuntu/
     export PATH=/opt/ORPER:$PATH 
     export PATH=/opt/R/4.0.5/bin:$PATH
     export PATH=/opt/FastANI:$PATH
+    export PATH=${HOME}/edirect:${PATH}
 
 %post
     # Ubuntu
@@ -75,6 +76,10 @@ MirrorURL: http://us.archive.ubuntu.com/ubuntu/
     ## Dependencies for MASH
     apt-get install -y automake autoconf
 
+    #NCBI Entrez
+    cd /opt/
+    sh -c "$(wget -q https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh -O -)"
+
     # cpanm
     apt install cpanminus -y
     apt-get install liblwp-protocol-https-perl -y
@@ -86,6 +91,8 @@ MirrorURL: http://us.archive.ubuntu.com/ubuntu/
     cpanm --force Bio::MUST::Core
     cpanm Bio::MUST::Drivers
     cpanm Bio::MUST::Apps::FortyTwo
+    cpanm Data::UUID
+    cpanm Data::GUID
 
     # BMGE
     cd /opt/

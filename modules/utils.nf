@@ -30,11 +30,11 @@ process CheckRefSeq {
 
     script:
         files = refseq_genomes.name
-        if ('refseq_empty-abbr.fna' in files && params.genbank == 'off') {
+        if ('refseq_empty-abbr.fna' in files && (params.refgenbank == 'off' || params.outgenbank == 'off')) {
             exit 1, "[ORPER-WARNING] No RefSeq genomes have been downloaded. Rerun ORPER with `--genbank` option enable"
         }
 
-        else if ('refseq_empty-abbr.fna' in files && params.genbank == 'on') {
+        else if ('refseq_empty-abbr.fna' in files && (params.refgenbank == 'on' || params.outgenbank == 'on')) {
             println("[ORPER-INFO] No RefSeq genomes have been downloaded. Continuing with GenBank genomes only")
             """
             touch checkrefseq.log

@@ -120,3 +120,49 @@ process rRNAFortyTwo {
         perl -i.bak -ple 's/#NEW#//' *-42-split.fasta
         """
 }
+
+process ITSFortyTwo {
+    input:
+	path FastaFiles
+        path taxdir
+
+    output:
+        path '*-ITS-split.fasta', emit: fasta_files
+
+    script:
+        """
+        # Download fungal ITS file from NCBI rRNA DB
+        wget https://ftp.ncbi.nlm.nih.gov/refseq/TargetedLoci/Fungi/fungi.ITS.fna.gz
+        gunzip *.gz
+        perl -nle 'if (m/^>/) { m/^>(\\S+)\\s(\\S+)\\s(\\S+)\\s/ ; print ">\$2_\$3\\@\$1" } else { print }' fungi.ITS.fna > fungi.ITS-renamed.fna
+        perl -i.bak -ple 's/\\]//g ; s/\\[//g; s/\\://g' fungi.ITS-renamed.fna
+        grep '>' fungi.ITS-renamed.fna | cut -f1 -d'@' | cut -c2- | sort | uniq -c | sort -rn | head -n20 | perl -ple 's/\\s+\\d+\\s//; s/_/ /' > queries.txt
+
+        # Bank
+        for REFORG in `echo "${FastaFiles}" | tr ' ' '\n'`; do makeblastdb -in \$REFORG -dbtype nucl -out `basename \$REFORG .fna` -parse_seqids; done
+        echo "${FastaFiles}" | tr ' ' '\n' | perl -nle 'm/(GC[AF]_\\d{9}\\.\\d+)/ ; print join "\t", \$1, \$_' > gca_file.idm
+        fetch-tax.pl gca_file.idm --taxdir=${taxdir} --col=1 --sep='\t' --item-type=taxid --org-mapper
+        paste gca_file.org-idm gca_file.idm | cut -f1,4 | sed 's/.fna//' > bank.idm
+
+        # YAML generator
+        yaml-generator-42.pl --run_mode=phylogenomic --SSUrRNA --out_suffix=-42 --queries queries.txt \
+        --evalue=1e-05 --max_target_seqs=1000 --bank_dir \$PWD --bank_suffix=.fna --bank_mapper bank.idm --code=1 \
+        --ref_brh=off --trim_homologues=on --trim_max_shift=20000 --trim_extra_margin=15 \
+        --merge_orthologues=off --aligner_mode=blast --ali_skip_self=off --ali_cover_mul=1.1 --ali_keep_old_new_tags=off \
+        --ali_keep_lengthened_seqs=keep --tax_reports=on --tax_min_score=0 --tax_score_mul=0 --tax_min_ident=0 --tax_min_len=0 \
+        --tol_check=off
+
+        # Run 42
+        forty-two.pl fungi.ITS-renamed.fna --config=config-42.yaml --verbosity=1
+
+        # Split results on individual FASTA
+        fasta2ali.pl fungi.ITS-renamed-42.fna --degap
+        grep NEW fungi.ITS-renamed-42.ali | cut -c2- > fungi.ITS-renamed-42.idl
+        prune-ali.pl fungi.ITS-renamed-42.idl --out=-new
+        grep '>' ./fungi.ITS-renamed-42-new.ali | perl -nle 'm/(GC[AF]_\\d{9}\\.\\d+)/ ; print \$1' | sort -u > org_gca.lis
+        for f in `cat org_gca.lis`; do grep -A1 \$f fungi.ITS-renamed-42-new.ali > \$f-ITS-split.ali; done
+        ali2fasta.pl *-ITS-split.ali
+        perl -i.bak -ple 's/#NEW#//' *-ITS-split.fasta
+        """
+}
+

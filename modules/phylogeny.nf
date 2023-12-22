@@ -26,6 +26,8 @@ process RaxmlReferenceTree {
 }
 
 process RaxmlConstrainTree {
+    publishDir "params.outdir", mode: copy, overwrite: false
+
     input:
         file RefTree
         file RefTreeId
@@ -37,12 +39,9 @@ process RaxmlConstrainTree {
     output:
         path 'constrained-tree.tre', emit: Tree
         path 'constrained-tree.nex', emit: NexusTree
-
-        //file 'Constained-tree.nex' into constTreeNexus_ch
-        //file 'Constained-tree.tre' into constTreeTre_ch
-        //file 'SSU-combined-ali-a2p.fasta' into alignementBmge_ch
-        //file 'SSU-combined-ali.fasta' into alignement_ch
-        //file 'GC.list' into gcfList_ch
+        path 'combined-rRNA_align.fasta', emit: alignFile
+        path 'combined-rRNA_align-a2p.fasta', emit: a2pAlignFile
+        path 'RefTree.gca', emit: RefTreeId
 
     script:
         """
@@ -59,9 +58,6 @@ process RaxmlConstrainTree {
         fasta2ali.pl all_rRNA_barrnap-uniq.fasta
         perl -nle 'm/(GC[AF]_\\d{9}\\.\\d+)/ ; print \$1' GC.list | sort -u > RefTree.gca
         for f in `cat RefTree.gca`; do grep -A1 \$f all_rRNA_barrnap-uniq.ali >> filtered_rRNA_barrnap-uniq.ali; done
-        #perl -nle 'm/(GC[AF]_\\d{9}\\.\\d+)/ ; print \$1' filtered_rRNA_barrnap-uniq.ali | sort -u > filtered_rRNA_barrnap-uniq.gca
-        #fetch-tax.pl filtered_rRNA_barrnap-uniq.gca --taxdir=${taxdir} --org-mapper --item-type=taxid
-        #change-ids-ali.pl filtered_rRNA_barrnap-uniq.ali --org-mapper=filtered_rRNA_barrnap-uniq.org-idm --mode=abbr2long --out=-long
         ali2fasta.pl filtered_rRNA_barrnap-uniq.ali
         perl -i.bak -ple 's/@.*//' filtered_rRNA_barrnap-uniq.fasta
     
@@ -70,6 +66,8 @@ process RaxmlConstrainTree {
 
         # Align comibined file and alignment filtering using BMGE
         mafft --adjustdirection --anysymbol --auto --reorder combined-rRNA.fasta 2>log > combined-rRNA_align.fasta
+        ali2phylip.pl combined-rRNA_align.fasta --bmge-mask=medium --max=0.6 --ali
+        ali2fasta.pl combined-rRNA_align-a2p.ali
         ali2phylip.pl combined-rRNA_align.fasta --bmge-mask=medium --max=0.6 --p80
         raxmlHPC-PTHREADS-AVX -T $params.cpu -r "${RefTree}" -s combined-rRNA_align.p80 \
         -n combined-rRNA_align-RAXML-GTRGAMMA-100xRAPIDBP -m GTRGAMMA -N 100 -f a -x 1975021703574 -p 197502170357 
@@ -78,7 +76,7 @@ process RaxmlConstrainTree {
         cp RAxML_bipartitions.combined-rRNA_align-RAXML-GTRGAMMA-100xRAPIDBP raxml.tre
         run_treeshrink.py -t raxml.tre
         perl -F"\\s" -anle 'next if m/Signature/; print \$F[2] if \$F[3] >= 0.1' raxml_treeshrink/output_summary.txt > long-branch-ids.list
-        grep -vf `echo "${OutGcaList}"` long-branch-ids.list || true > constrained-tree.idl
+        grep -vf `echo "${OutGcaList}"` long-branch-ids.list > constrained-tree.idl
         cp RAxML_bipartitions.combined-rRNA_align-RAXML-GTRGAMMA-100xRAPIDBP constrained-tree.tre
         prune-tree.pl --negate-list constrained-tree.idl
         format-tree.pl constrained-tree.tre --figtree
